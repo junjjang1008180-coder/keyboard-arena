@@ -455,7 +455,7 @@
   // =========================================================
   const keys = new Set();
   const BLOCK_DEFAULT = new Set([
-    'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyJ', 'KeyK', 'KeyL', 'KeyU', 'KeyI', 'KeyO', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+    'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyJ', 'KeyK', 'KeyL', 'KeyU', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
     'Space', 'ShiftLeft', 'ShiftRight', 'Enter', 'NumpadEnter', 'Escape', 'KeyR',
     'Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3', 'Tab'
   ]);
@@ -551,9 +551,7 @@
         else if (code === 'ShiftLeft' || code === 'ShiftRight') game.player.dashBuffer = 0.15;
         else if (code === 'KeyJ') game.player.skillBuffer = 0.15;
         else if (code === 'KeyL') drinkPotion();
-        else if (code === 'KeyU') useSupportSkill(0);
-        else if (code === 'KeyI') useSupportSkill(1);
-        else if (code === 'KeyO') useSupportSkill(2);
+        else if (code === 'KeyU') useSupportSkill();
         else if (code === 'KeyK') game.player.ultBuffer = 0.15;
         break;
       case 'paused':
@@ -1505,23 +1503,19 @@
   const ALLY = {
     healer: {
       name: '성녀', set: 'healer', color: '#ffe08a', hp: 90, speed: 240, follow: [-58, -24], atkCd: 1.3,
-      skills: [{ name: '치유의 빛', desc: '체력 35% 즉시 회복' }, { name: '보호의 기도', desc: '10초간 피해를 흡수하는 보호막' },
-        { name: '축복의 오라', desc: '10초간 공격력 +30% · 체력 재생' }]
+      skill: { name: '치유의 빛', desc: '체력 35% 즉시 회복' }
     },
     summoner: {
       name: '정령 소환사', set: 'summoner', color: '#c58bff', hp: 80, speed: 240, follow: [58, -24], atkCd: 0.9,
-      skills: [{ name: '정령 소환', desc: '적을 쫓아가 터지는 정령 5마리' }, { name: '마법 폭발', desc: '적이 가장 많이 모인 곳에 큰 폭발' },
-        { name: '마법 보호막', desc: '7초간 받는 피해 절반' }]
+      skill: { name: '정령 소환', desc: '적을 쫓아가 터지는 정령 5마리' }
     },
     guard: {
       name: '방패 전사', set: 'guard', color: '#7aa8ff', hp: 200, speed: 260, follow: [0, 46], atkCd: 0.8,
-      skills: [{ name: '방패 돌진', desc: '적진으로 돌진해 밀쳐 내고 기절' }, { name: '전장 지배', desc: '8초간 주변 적 둔화 · 받는 피해 +20%' },
-        { name: '수호의 벽', desc: '7초간 날아오는 탄환 차단' }]
+      skill: { name: '수호의 벽', desc: '7초간 날아오는 탄환 차단' }
     }
   };
-  // 서포터는 게임 시작 전에 한 명 고르고, 스킬은 U·I·O로 직접 쓴다 (각 30초)
+  // 서포터는 게임 시작 전에 한 명 고르고, 서포터마다 하나뿐인 스킬은 U로 직접 쓴다 (30초)
   const SUPPORT_KEYS = ['healer', 'summoner', 'guard'];
-  const SUPPORT_SKILL_KEYS = ['U', 'I', 'O'];
   const SUPPORT_CD = 30;
 
   function joinAlly(kind, quiet) {
@@ -1530,7 +1524,7 @@
     const d = ALLY[kind];
     const a = {
       kind, def: d, x: p.x + d.follow[0], y: p.y + d.follow[1], r: 12, hp: d.hp, maxHp: d.hp, vx: 0, vy: 0,
-      anim: newAnim(), act: 'idle', actT: 0, atkCd: 1, atkT: 0, cds: d.skills.map(() => 0),
+      anim: newAnim(), act: 'idle', actT: 0, atkCd: 1, atkT: 0, cd: 0,
       dead: false, reviveT: 0, flash: 0, hitT: 0, castT: 0, invuln: 0, dashT: 0, dashDir: { x: 1, y: 0 }, dashHits: []
     };
     constrain(a, a.r);
@@ -1539,7 +1533,7 @@
     if (quiet) return;
     addFx('sk_star', a.x, a.y - 20, 0.8, 0.3, 1.4, 1, true);
     burst(a.x, a.y - 20, d.color, 24, 200, 0.6, 3);
-    showBanner('서포터 합류: ' + d.name + '!', d.skills.map((s) => s.name).join(' · '), d.color);
+    showBanner('서포터 합류: ' + d.name + '!', d.skill.name + ' — ' + d.skill.desc, d.color);
   }
 
   function nearestEnemy(x, y, range) {
@@ -1607,7 +1601,7 @@
         continue;
       }
       a.hp = Math.min(a.maxHp, a.hp + dt * 2);
-      for (let i = 0; i < a.cds.length; i++) a.cds[i] = Math.max(0, a.cds[i] - dt);
+      a.cd = Math.max(0, a.cd - dt);
       a.atkCd -= dt;
 
       // 이동: 플레이어 곁을 따라다닌다 (방패 전사는 가까운 적에게 맞선다)
@@ -1677,23 +1671,22 @@
     });
   }
 
-  // 서포터 스킬 직접 사용 (U·I·O). 쿨타임 30초
-  function useSupportSkill(i) {
+  // 서포터 스킬 직접 사용 (U). 쿨타임 30초
+  function useSupportSkill() {
     const g = game;
     const p = g.player;
     const a = g.allies[0];
     if (!a || p.dead) return;
-    const sk = a.def.skills[i];
-    if (a.cds[i] > 0) {
-      addText(p.x, p.y - 80, sk.name + ' — ' + Math.ceil(a.cds[i]) + '초 남음', '#cdb894', 13, 0.8);
+    const sk = a.def.skill;
+    if (a.cd > 0) {
+      addText(p.x, p.y - 80, sk.name + ' — ' + Math.ceil(a.cd) + '초 남음', '#cdb894', 13, 0.8);
       return;
     }
-    a.cds[i] = SUPPORT_CD;
-    const foe = nearestEnemy(p.x, p.y, 600);
-    switch (a.kind + i) {
-      case 'healer0': {
+    a.cd = SUPPORT_CD;
+    allyCast(a, sk.name, 0.6);
+    switch (a.kind) {
+      case 'healer': {
         // 치유의 빛: 체력 35% 즉시 회복
-        allyCast(a, sk.name, 0.6);
         const heal = Math.round(p.maxHp * 0.35);
         p.hp = Math.min(p.maxHp, p.hp + heal);
         addFx('sk_star', p.x, p.y - p.bodyH, 0.7, 0.4, 1.4, 0.9, true);
@@ -1703,64 +1696,14 @@
         }
         break;
       }
-      case 'healer1':
-        // 보호의 기도: 피해를 흡수하는 보호막
-        allyCast(a, sk.name, 0.6);
-        p.guardShield = Math.round(30 + p.maxHp * 0.25);
-        p.guardT = 10;
-        break;
-      case 'healer2':
-        // 축복의 오라: 공격력 +30%, 체력 재생
-        allyCast(a, sk.name, 0.6);
-        p.blessT = 10;
-        break;
-      case 'summoner0':
+      case 'summoner':
         // 정령 소환: 플레이어 곁을 돌다가 적에게 날아가 터진다
-        allyCast(a, sk.name, 0.5);
         for (let k = 0; k < 5; k++) {
           g.wisps.push({ x: a.x, y: a.y - 40, t: 0, life: 8, target: null, ang: (k / 5) * TAU, dmg: 16 + p.damage * 1.4 });
         }
         break;
-      case 'summoner1': {
-        // 마법 폭발: 적이 가장 많이 모인 곳 (적이 없으면 조준 방향)
-        let best = null, bestN = 0;
-        for (const e of g.enemies) {
-          if (e.dead || e.spawnT > 0 || Math.hypot(e.x - p.x, e.y - p.y) > 500) continue;
-          let n = 0;
-          for (const o of g.enemies) if (!o.dead && groundDist(o.x, o.y, e.x, e.y) < 100) n++;
-          if (n > bestN) { bestN = n; best = e; }
-        }
-        const pt = best ? { x: best.x, y: best.y } : { x: p.x + p.aim.x * 160, y: p.y + p.aim.y * 120 };
-        constrain(pt, 20);
-        allyCast(a, sk.name, 0.5);
-        g.blasts.push({ kind: 'magic', x: pt.x, y: pt.y, delay: 0.5, max: 0.5, r: 110, dmg: 25 + p.damage * 3 });
-        break;
-      }
-      case 'summoner2':
-        // 마법 보호막: 받는 피해 절반
-        allyCast(a, sk.name, 0.5);
-        p.bubbleT = 7;
-        break;
-      case 'guard0': {
-        // 방패 돌진: 가까운 적에게 (없으면 조준 방향으로) 돌진
-        let dx = p.aim.x, dy = p.aim.y;
-        if (foe) { dx = foe.x - a.x; dy = foe.y - a.y; }
-        const dd = Math.hypot(dx, dy) || 1;
-        a.dashT = 0.42;
-        a.dashDir = { x: dx / dd, y: dy / dd };
-        a.dashHits = [];
-        a.anim.faceT = dx > 0 ? 1 : -1;
-        addText(a.x, a.y - a.bodyH * 2 - 14, sk.name, a.def.color, 13, 0.9);
-        break;
-      }
-      case 'guard1':
-        // 전장 지배: 플레이어 자리에 깃발
-        allyCast(a, sk.name, 0.5);
-        g.banners.push({ x: p.x, y: p.y, t: 8, max: 8, r: 180 });
-        break;
-      case 'guard2':
+      case 'guard':
         // 수호의 벽: 날아오는 탄환 차단
-        allyCast(a, sk.name, 0.5);
         p.wallT = 7;
         break;
     }
@@ -4082,21 +4025,27 @@
     text(p.potions + '/' + MAX_POTIONS, 190, 146, 12, '#e3cfa6', 'left', 700, 3);
     if (p.regenT > 0) text('재생 중 ' + p.regenT.toFixed(1) + '초', 336, 146, 12, '#7ee07a', 'right', 800, 3);
 
-    // 서포터: U·I·O 스킬 3개와 쿨타임
+    // 서포터: U 스킬과 쿨타임
     let panelBottom = 160;
     const sup = g.allies[0];
     if (sup) {
-      panel(10, 166, 340, 96, 0.82);
-      drawActor('portrait_' + sup.kind, 36, 254, { scale: 0.42 });
+      const ready = sup.cd <= 0;
+      panel(10, 166, 340, 68, 0.82);
+      drawActor('portrait_' + sup.kind, 36, 228, { scale: 0.36 });
       text(sup.def.name, 66, 186, 13, sup.def.color, 'left', 800, 3);
-      sup.def.skills.forEach((sk, j) => {
-        const yy = 206 + j * 20;
-        const ready = sup.cds[j] <= 0;
-        keyCap(SUPPORT_SKILL_KEYS[j], 66, yy + 6, 11);
-        drawBar(92, yy - 4, 244, 13, 1 - sup.cds[j] / SUPPORT_CD, ready ? sup.def.color : 'rgba(160,140,110,0.6)');
-        text(sk.name + (ready ? '  준비 완료' : '  ' + Math.ceil(sup.cds[j]) + '초'), 214, yy + 7, 11, '#ffffff', 'center', 800, 3);
-      });
-      panelBottom = 262;
+      keyCap('U', 66, 216, 11);
+      drawBar(92, 206, 244, 13, 1 - sup.cd / SUPPORT_CD, ready ? sup.def.color : 'rgba(160,140,110,0.6)');
+      text(sup.def.skill.name + (ready ? '  준비 완료' : '  ' + Math.ceil(sup.cd) + '초'), 214, 217, 11, '#ffffff', 'center', 800, 3);
+      if (ready) {
+        ctx.save();
+        ctx.globalAlpha = 0.35 + 0.25 * Math.sin(globalTime * 6);
+        roundRect(90, 204, 248, 17, 8);
+        ctx.strokeStyle = sup.def.color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+      }
+      panelBottom = 234;
     }
     // 서포터가 걸어 준 효과
     const buffs = [];
@@ -4143,7 +4092,7 @@
     const by = VH - 15;
     text('공격력 ' + p.damage.toFixed(1) + '  ·  이동 ' + Math.round(p.speed) + '  ·  공속 ' + (1 / p.fireInterval).toFixed(1) + '/초',
       24, by, 13, '#e3cfa6', 'left', 600);
-    drawKeyGuide([['WASD', '이동'], ['←↑↓→', '조준'], ['Space', '공격'], ['Shift', '대시'], ['J', '스킬'], ['K', '궁극기'], ['L', '물약'], ['U·I·O', '서포터'], ['Esc', '일시정지']], VW - 24, by);
+    drawKeyGuide([['WASD', '이동'], ['←↑↓→', '조준'], ['Space', '공격'], ['Shift', '대시'], ['J', '스킬'], ['K', '궁극기'], ['L', '물약'], ['U', '서포터'], ['Esc', '일시정지']], VW - 24, by);
 
     // 피격·저체력 효과
     if (g.hurtFlash > 0) {
@@ -4350,7 +4299,7 @@
     dim(0.55);
     const cx = VW / 2;
     text('서포터 선택', cx, 88, 54, '#ffcf6a', 'center', 900, 8);
-    text('함께 싸울 동료를 한 명 고르세요 — 서포터는 무적이고, 스킬은 U · I · O로 직접 씁니다 (각 30초)', cx, 124, 16, '#f6e7c8', 'center', 700, 4);
+    text('함께 싸울 동료를 한 명 고르세요 — 서포터는 무적이고, 스킬은 U로 직접 씁니다 (30초)', cx, 124, 16, '#f6e7c8', 'center', 700, 4);
     const cw = 280, ch = 400, gap = 24;
     const x0 = cx - (cw * 3 + gap * 2) / 2;
     const y0 = 150;
@@ -4367,12 +4316,11 @@
         scale: 1.0, sqy: 1 + breathe, sqx: 1 - breathe * 0.5, lift: sel ? Math.abs(Math.sin(globalTime * 2.6)) * 3 : 0, alpha: sel ? 1 : 0.55
       });
       text(d.name, x + cw / 2, y + 226, 24, sel ? d.color : '#cdb894', 'center', 900, 4);
-      d.skills.forEach((s, j) => {
-        const yy = y + 266 + j * 42;
-        keyCap(SUPPORT_SKILL_KEYS[j], x + 18, yy, 12);
-        text(s.name, x + 50, yy, 15, sel ? '#fff6e0' : '#9c8a6c', 'left', 800);
-        text(s.desc, x + 50, yy + 18, 12, sel ? '#e3cfa6' : '#8a785c', 'left', 500);
-      });
+      text('서포터 스킬', x + cw / 2, y + 268, 13, sel ? '#ffcf6a' : '#8a785c', 'center', 800);
+      keyCap('U', x + cw / 2 - 70, y + 304, 14);
+      text(d.skill.name, x + cw / 2 - 40, y + 304, 20, sel ? '#fff6e0' : '#9c8a6c', 'left', 900, 3);
+      text(d.skill.desc, x + cw / 2, y + 334, 14, sel ? '#e3cfa6' : '#8a785c', 'center', 600);
+      text('쿨타임 30초', x + cw / 2, y + 360, 12, sel ? '#9c8a6c' : '#6a5a44', 'center', 600);
     });
     const off = Math.sin(globalTime * 6) * 4;
     text('◀', x0 - 26 - off, y0 + 190, 26, '#ffd27a', 'center', 900, 4);
@@ -4404,7 +4352,7 @@
       ['Esc', '일시정지 / 뒤로 가기'],
       ['Enter', '메뉴 결정'],
       ['← → ↑ ↓', '메뉴 · 캐릭터 · 강화 선택'],
-      ['U · I · O', '서포터 스킬 (각 30초)'],
+      ['U', '서포터 스킬 (30초)'],
       ['R', '게임 오버 후 재시작']
     ];
     for (const [k, d] of ctrl) {
